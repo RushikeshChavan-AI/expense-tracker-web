@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Wallet, TrendingUp, TrendingDown, Award } from "lucide-react";
+import { Wallet, TrendingUp, TrendingDown, Award, Users } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { useAnalytics } from "../hooks/useAnalytics";
 import { formatCurrency } from "../utils/format";
@@ -7,19 +7,33 @@ import StatCard from "../components/dashboard/StatCard";
 import BalanceOrb from "../components/dashboard/BalanceOrb";
 import RecentTransactions from "../components/dashboard/RecentTransactions";
 import QuickActions from "../components/dashboard/QuickActions";
+import SplitBalanceOverview from "../components/dashboard/SplitBalanceOverview";
 import CategoryPieChart from "../components/charts/CategoryPieChart";
 import MonthlyBarChart from "../components/charts/MonthlyBarChart";
 import Modal from "../components/ui/Modal";
 import TransactionForm from "../components/transactions/TransactionForm";
+import SplitExpenseForm from "../components/split/SplitExpenseForm";
 import { getCategoryIcon } from "../utils/categoryIcon";
 
 export default function Dashboard() {
-  const { stats, getCategory, addTransaction } = useApp();
+  const {
+    stats,
+    splitPeople,
+    splitExpenses,
+    categories,
+    isStartupMode,
+    getCategory,
+    addTransaction,
+    addSplitExpense,
+  } = useApp();
   const { categoryPieData, monthlyBarData } = useAnalytics();
   const [modalType, setModalType] = useState(null);
 
   const topCategory = stats.topCategoryId ? getCategory(stats.topCategoryId) : null;
   const TopIcon = getCategoryIcon(topCategory?.icon);
+  const expenseTrend = isStartupMode
+    ? `${splitExpenses.length} paid expense${splitExpenses.length === 1 ? "" : "s"} recorded`
+    : undefined;
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -28,12 +42,16 @@ export default function Dashboard() {
         <p className="mt-1 text-sm text-muted">Here's a snapshot of your finances this month.</p>
       </div>
 
-      <QuickActions onAddIncome={() => setModalType("income")} onAddExpense={() => setModalType("expense")} />
+      <QuickActions
+        onAddIncome={() => setModalType("income")}
+        onAddExpense={() => setModalType("expense")}
+        onAddSplitExpense={() => setModalType("split")}
+      />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Current Balance" value={formatCurrency(stats.balance)} icon={Wallet} tone="gold" />
         <StatCard label="Total Income" value={formatCurrency(stats.totalIncome)} icon={TrendingUp} tone="emerald" />
-        <StatCard label="Total Expenses" value={formatCurrency(stats.totalExpense)} icon={TrendingDown} tone="coral" />
+        <StatCard label="Total Expenses" value={formatCurrency(stats.totalExpense)} icon={TrendingDown} tone="coral" trend={expenseTrend} />
         <StatCard
           label="Top Spending Category"
           value={topCategory?.name || "—"}
@@ -42,6 +60,19 @@ export default function Dashboard() {
           trend={topCategory ? formatCurrency(stats.byCategory[topCategory.id]) + " spent" : "No expenses yet"}
         />
       </div>
+
+      {isStartupMode && (
+        <div className="glass rounded-2xl p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-display text-sm font-semibold text-ink">Startup Split Balance Overview</h3>
+              <p className="mt-1 text-xs text-muted">Co-founder payments, ownership shares, and settlement moves.</p>
+            </div>
+            <Users size={18} className="text-gold" />
+          </div>
+          <SplitBalanceOverview />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="glass flex flex-col items-center justify-center rounded-2xl p-6 xl:col-span-1">
@@ -67,15 +98,34 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <Modal open={!!modalType} onClose={() => setModalType(null)} title={modalType === "income" ? "Add Income" : "Add Expense"}>
-        <TransactionForm
-          lockedType={modalType}
-          onSubmit={(data) => {
-            addTransaction(data);
-            setModalType(null);
-          }}
-          onCancel={() => setModalType(null)}
-        />
+      <Modal
+        open={!!modalType}
+        onClose={() => setModalType(null)}
+        title={modalType === "income" ? "Add Income" : "Add Expense"}
+        size={modalType === "split" ? "xl" : "md"}
+      >
+        {modalType === "split" ? (
+          <SplitExpenseForm
+            people={splitPeople}
+            categories={categories}
+            submitLabel="Add Expense"
+            showCancel
+            onSubmit={async (data) => {
+              await addSplitExpense(data);
+              setModalType(null);
+            }}
+            onCancel={() => setModalType(null)}
+          />
+        ) : (
+          <TransactionForm
+            lockedType={modalType}
+            onSubmit={(data) => {
+              addTransaction(data);
+              setModalType(null);
+            }}
+            onCancel={() => setModalType(null)}
+          />
+        )}
       </Modal>
     </div>
   );

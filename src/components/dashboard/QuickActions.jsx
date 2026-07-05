@@ -1,17 +1,22 @@
 import { useNavigate } from "react-router-dom";
-import { PlusCircle, MinusCircle, Sparkles, Download } from "lucide-react";
+import { PlusCircle, MinusCircle, Sparkles, Download, Users } from "lucide-react";
 import { useApp } from "../../context/AppContext";
 import { exportTransactionsToCSV } from "../../services/csvService";
 import { useToast } from "../../context/ToastContext";
 
-export default function QuickActions({ onAddIncome, onAddExpense }) {
+export default function QuickActions({ onAddIncome, onAddExpense, onAddSplitExpense }) {
   const navigate = useNavigate();
-  const { transactions, categories } = useApp();
+  const { transactions, categories, isStartupMode } = useApp();
   const toast = useToast();
 
   const actions = [
     { label: "Add Income", icon: PlusCircle, tone: "text-emerald", onClick: onAddIncome },
-    { label: "Add Expense", icon: MinusCircle, tone: "text-coral", onClick: onAddExpense },
+    {
+      label: "Add Expense",
+      icon: isStartupMode ? Users : MinusCircle,
+      tone: isStartupMode ? "text-gold" : "text-coral",
+      onClick: isStartupMode ? onAddSplitExpense : onAddExpense,
+    },
     { label: "Ask AI", icon: Sparkles, tone: "text-violet", onClick: () => navigate("/ai-assistant") },
     {
       label: "Export CSV",

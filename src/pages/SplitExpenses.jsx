@@ -1,19 +1,11 @@
 import { useMemo, useState } from "react";
-import { Calendar, Database, FileText, IndianRupee, Plus, Receipt, Trash2, UserPlus, Users } from "lucide-react";
+import { Database, Pencil, Receipt, Trash2, UserPlus, Users, X } from "lucide-react";
 import { useApp } from "../context/AppContext";
-import { formatCurrency, formatDate, todayISO } from "../utils/format";
+import { formatCurrency, formatDate } from "../utils/format";
 import Button from "../components/ui/Button";
 import EmptyState from "../components/ui/EmptyState";
 import Input from "../components/ui/Input";
-import Select from "../components/ui/Select";
-
-const emptyExpense = {
-  description: "",
-  amount: "",
-  paidBy: "",
-  participantIds: [],
-  date: todayISO(),
-};
+import SplitExpenseForm from "../components/split/SplitExpenseForm";
 
 function getSettlements(people, balances) {
   const creditors = people
@@ -49,25 +41,53 @@ function getSettlements(people, balances) {
   return settlements;
 }
 
+function getShareAmount(expense, personId) {
+  if (expense.splitMethod === "percentage") {
+    return Number(expense.amount) * (Number(expense.shares?.[personId] || 0) / 100);
+  }
+  if (expense.splitMethod === "custom") {
+    return Number(expense.shares?.[personId] || 0);
+  }
+  return Number(expense.amount) / Math.max(expense.participantIds.length, 1);
+}
+
 export default function SplitExpenses() {
   const {
     splitPeople,
     splitExpenses,
     splitStats,
     splitSetupRequired,
+    categories,
+    isStartupMode,
     addSplitPerson,
     deleteSplitPerson,
     addSplitExpense,
+    updateSplitExpense,
     deleteSplitExpense,
   } = useApp();
   const [personName, setPersonName] = useState("");
-  const [expense, setExpense] = useState(emptyExpense);
-  const [errors, setErrors] = useState({});
+  const [editingExpense, setEditingExpense] = useState(null);
   const [savingPerson, setSavingPerson] = useState(false);
-  const [savingExpense, setSavingExpense] = useState(false);
 
   const peopleById = useMemo(() => Object.fromEntries(splitPeople.map((person) => [person.id, person])), [splitPeople]);
   const settlements = useMemo(() => getSettlements(splitPeople, splitStats.balances), [splitPeople, splitStats.balances]);
+
+  if (!isStartupMode) {
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-5">
+        <div>
+          <h2 className="flex items-center gap-2 font-display text-2xl font-bold text-ink">
+            <Users size={22} className="text-gold" /> Startup Splits
+          </h2>
+          <p className="mt-1 text-sm text-muted">Split expense tracking is available for startup accounts.</p>
+        </div>
+
+        <section className="glass rounded-2xl p-6 text-sm text-muted">
+          This account is currently set up for personal expense tracking, so startup co-founder split tools are hidden.
+        </section>
+      </div>
+    );
+  }
 
   const handleAddPerson = async (event) => {
     event.preventDefault();
@@ -79,57 +99,33 @@ export default function SplitExpenses() {
     try {
       const person = await addSplitPerson({ name });
       setPersonName("");
-      setExpense((prev) => ({
-        ...prev,
-        paidBy: prev.paidBy || person.id,
-        participantIds: [...prev.participantIds, person.id],
-      }));
+      setEditingExpense((prev) => (prev ? { ...prev, participantIds: [...prev.participantIds, person.id] } : prev));
     } finally {
       setSavingPerson(false);
     }
   };
 
-  const toggleParticipant = (personId) => {
-    setExpense((prev) => {
-      const selected = prev.participantIds.includes(personId);
-      return {
-        ...prev,
-        participantIds: selected
-          ? prev.participantIds.filter((id) => id !== personId)
-          : [...prev.participantIds, personId],
-      };
-    });
+  const resetExpenseForm = () => {
+    setEditingExpense(null);
   };
 
-  const validateExpense = () => {
-    const next = {};
-    if (!expense.description.trim()) next.description = "Add a short description";
-    if (!expense.amount || Number(expense.amount) <= 0) next.amount = "Enter an amount greater than 0";
-    if (!expense.paidBy) next.paidBy = "Choose who paid";
-    if (!expense.participantIds.length) next.participantIds = "Choose at least one person to split with";
-    setErrors(next);
-    return Object.keys(next).length === 0;
+  const editSplitExpense = (item) => {
+    setEditingExpense(item);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleAddExpense = async (event) => {
-    event.preventDefault();
-    if (!validateExpense()) return;
-
-    setSavingExpense(true);
-    try {
-      await addSplitExpense({
-        ...expense,
-        amount: Number(expense.amount),
-      });
-      setExpense({
-        ...emptyExpense,
-        paidBy: expense.paidBy,
-        participantIds: splitPeople.map((person) => person.id),
-      });
-      setErrors({});
-    } finally {
-      setSavingExpense(false);
+  const handleSubmitExpense = async (payload) => {
+    if (editingExpense) {
+      await updateSplitExpense(editingExpense.id, payload);
+    } else {
+      await addSplitExpense(payload);
     }
+    resetExpenseForm();
+  };
+
+  const handleDeleteExpense = async (id) => {
+    await deleteSplitExpense(id);
+    if (editingExpense?.id === id) resetExpenseForm();
   };
 
   if (splitSetupRequired) {
@@ -171,7 +167,10 @@ export default function SplitExpenses() {
 
       <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
         <section className="glass rounded-2xl p-5">
-          <h3 className="mb-4 font-display text-sm font-semibold text-ink">People</h3>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-display text-sm font-semibold text-ink">People</h3>
+            <span className="rounded-full bg-white/5 px-2.5 py-1 text-xs text-muted">{splitPeople.length} total</span>
+          </div>
           <form onSubmit={handleAddPerson} className="flex gap-2">
             <Input
               className="h-full"
@@ -206,73 +205,29 @@ export default function SplitExpenses() {
         </section>
 
         <section className="glass rounded-2xl p-5">
-          <h3 className="mb-4 font-display text-sm font-semibold text-ink">Add Split Expense</h3>
-          <form onSubmit={handleAddExpense} className="grid gap-4 md:grid-cols-2">
-            <Input
-              label="Description"
-              icon={FileText}
-              placeholder="e.g. Dinner"
-              value={expense.description}
-              error={errors.description}
-              onChange={(event) => setExpense((prev) => ({ ...prev, description: event.target.value }))}
-            />
-            <Input
-              label="Amount"
-              icon={IndianRupee}
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={expense.amount}
-              error={errors.amount}
-              onChange={(event) => setExpense((prev) => ({ ...prev, amount: event.target.value }))}
-            />
-            <Select
-              label="Paid by"
-              value={expense.paidBy}
-              error={errors.paidBy}
-              onChange={(event) => setExpense((prev) => ({ ...prev, paidBy: event.target.value }))}
-              options={[
-                { value: "", label: "Select payer" },
-                ...splitPeople.map((person) => ({ value: person.id, label: person.name })),
-              ]}
-            />
-            <Input
-              label="Date"
-              icon={Calendar}
-              type="date"
-              value={expense.date}
-              max={todayISO()}
-              onChange={(event) => setExpense((prev) => ({ ...prev, date: event.target.value }))}
-            />
-
-            <div className="md:col-span-2">
-              <label className="mb-2 block text-xs font-medium text-muted">Split with</label>
-              <div className="flex flex-wrap gap-2">
-                {splitPeople.map((person) => (
-                  <button
-                    type="button"
-                    key={person.id}
-                    onClick={() => toggleParticipant(person.id)}
-                    className={`rounded-xl border px-3 py-2 text-xs font-medium transition ${
-                      expense.participantIds.includes(person.id)
-                        ? "border-gold/50 bg-gold-soft text-gold"
-                        : "border-border text-muted hover:bg-white/5 hover:text-ink"
-                    }`}
-                  >
-                    {person.name}
-                  </button>
-                ))}
-              </div>
-              {errors.participantIds && <p className="mt-1.5 text-xs text-coral">{errors.participantIds}</p>}
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-display text-sm font-semibold text-ink">
+                {editingExpense ? "Edit Expense" : "Add Expense"}
+              </h3>
+              <p className="mt-1 text-xs text-muted">
+                {editingExpense ? "Update payer, amount, date, or who shared it." : "Choose who paid and how the cost is split."}
+              </p>
             </div>
-
-            <div className="md:col-span-2">
-              <Button type="submit" icon={Plus} loading={savingExpense} disabled={splitPeople.length === 0}>
-                Add Split Expense
+            {editingExpense && (
+              <Button type="button" variant="ghost" size="sm" icon={X} onClick={resetExpenseForm}>
+                Cancel
               </Button>
-            </div>
-          </form>
+            )}
+          </div>
+          <SplitExpenseForm
+            key={editingExpense?.id || "new"}
+            people={splitPeople}
+            categories={categories}
+            initial={editingExpense}
+            submitLabel={editingExpense ? "Save Expense" : "Add Expense"}
+            onSubmit={handleSubmitExpense}
+          />
         </section>
       </div>
 
@@ -335,7 +290,12 @@ export default function SplitExpenses() {
             {splitExpenses.map((item) => {
               const paidBy = peopleById[item.paidBy]?.name || "Unknown";
               const participants = item.participantIds.map((id) => peopleById[id]?.name || "Unknown").join(", ");
-              const share = item.amount / Math.max(item.participantIds.length, 1);
+              const splitLabel =
+                item.splitMethod === "percentage"
+                  ? "percentage split"
+                  : item.splitMethod === "custom"
+                    ? "custom split"
+                    : `${formatCurrency(getShareAmount(item, item.participantIds[0]))} each`;
               return (
                 <div key={item.id} className="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between">
                   <div>
@@ -343,13 +303,21 @@ export default function SplitExpenses() {
                     <p className="mt-1 text-xs text-muted">
                       Paid by {paidBy} on {formatDate(item.date)} • split with {participants}
                     </p>
-                    <p className="mt-1 text-xs text-muted">Share: {formatCurrency(share)} each</p>
+                    <p className="mt-1 text-xs text-muted">Share: {splitLabel}</p>
                   </div>
                   <div className="flex items-center justify-between gap-3 md:justify-end">
                     <span className="font-mono-num text-sm font-bold text-ink">{formatCurrency(item.amount)}</span>
                     <button
                       type="button"
-                      onClick={() => deleteSplitExpense(item.id)}
+                      onClick={() => editSplitExpense(item)}
+                      className="rounded-lg p-1.5 text-muted transition hover:bg-white/10 hover:text-gold"
+                      aria-label={`Edit ${item.description}`}
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteExpense(item.id)}
                       className="rounded-lg p-1.5 text-muted transition hover:bg-coral-soft hover:text-coral"
                       aria-label={`Delete ${item.description}`}
                     >

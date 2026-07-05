@@ -4,16 +4,15 @@ import { formatMonthLabel } from "../utils/format";
 import { CHART_COLORS } from "../utils/constants";
 
 export function useAnalytics() {
-  const { transactions, categories } = useApp();
+  const { transactions, splitExpenses, categories, isStartupMode } = useApp();
 
   return useMemo(() => {
     // Category pie (expenses only)
     const categoryTotals = {};
-    transactions
-      .filter((t) => t.type === "expense")
-      .forEach((t) => {
-        categoryTotals[t.category] = (categoryTotals[t.category] || 0) + Number(t.amount);
-      });
+    const expenseRows = isStartupMode ? splitExpenses : transactions.filter((t) => t.type === "expense");
+    expenseRows.forEach((t) => {
+      categoryTotals[t.category] = (categoryTotals[t.category] || 0) + Number(t.amount);
+    });
 
     const categoryPieData = Object.entries(categoryTotals)
       .map(([id, value], i) => {
@@ -39,24 +38,47 @@ export function useAnalytics() {
       months.map((m) => [m.key, { month: m.label, income: 0, expense: 0 }])
     );
 
-    transactions.forEach((t) => {
-      const key = monthKey(t.date);
-      if (monthlyMap[key]) {
-        monthlyMap[key][t.type === "income" ? "income" : "expense"] += Number(t.amount);
-      }
-    });
+    if (isStartupMode) {
+      transactions
+        .filter((t) => t.type === "income")
+        .forEach((t) => {
+          const key = monthKey(t.date);
+          if (monthlyMap[key]) {
+            monthlyMap[key].income += Number(t.amount);
+          }
+        });
+
+      splitExpenses.forEach((expense) => {
+        const key = monthKey(expense.date);
+        if (monthlyMap[key]) {
+          monthlyMap[key].expense += Number(expense.amount);
+        }
+      });
+    } else {
+      transactions.forEach((t) => {
+        const key = monthKey(t.date);
+        if (monthlyMap[key]) {
+          monthlyMap[key][t.type === "income" ? "income" : "expense"] += Number(t.amount);
+        }
+      });
+    }
 
     const monthlyBarData = months.map((m) => monthlyMap[m.key]);
 
     // Running balance trend across the same window
     let running = 0;
-    const priorTransactions = transactions.filter(
-      (t) => new Date(t.date) < new Date(now.getFullYear(), now.getMonth() - 5, 1)
-    );
-    running = priorTransactions.reduce(
-      (sum, t) => sum + (t.type === "income" ? Number(t.amount) : -Number(t.amount)),
-      0
-    );
+    const trendStartDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const priorTransactions = transactions.filter((t) => new Date(t.date) < trendStartDate);
+    running = priorTransactions.reduce((sum, t) => {
+      if (isStartupMode && t.type !== "income") return sum;
+      return sum + (t.type === "income" ? Number(t.amount) : -Number(t.amount));
+    }, 0);
+
+    if (isStartupMode) {
+      running -= splitExpenses
+        .filter((expense) => new Date(expense.date) < trendStartDate)
+        .reduce((sum, expense) => sum + Number(expense.amount), 0);
+    }
 
     const trendLineData = months.map((m) => {
       const entry = monthlyMap[m.key];
@@ -65,5 +87,5 @@ export function useAnalytics() {
     });
 
     return { categoryPieData, monthlyBarData, trendLineData };
-  }, [transactions, categories]);
+  }, [transactions, splitExpenses, categories, isStartupMode]);
 }

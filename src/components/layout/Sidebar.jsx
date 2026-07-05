@@ -11,6 +11,7 @@ import {
   Wallet,
   X,
 } from "lucide-react";
+import { useApp } from "../../context/AppContext";
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
@@ -24,6 +25,14 @@ const NAV_ITEMS = [
 ];
 
 export default function Sidebar({ open, onClose }) {
+  const { isStartupMode } = useApp();
+  const items = NAV_ITEMS.filter((item) => {
+    if (isStartupMode) return item.to !== "/expenses";
+    return item.to !== "/split-expenses";
+  }).map((item) => (
+    isStartupMode && item.to === "/split-expenses" ? { ...item, label: "Startup Expenses" } : item
+  ));
+
   return (
     <>
       {open && (
@@ -50,7 +59,7 @@ export default function Sidebar({ open, onClose }) {
         </div>
 
         <nav className="flex flex-1 flex-col gap-1">
-          {NAV_ITEMS.map((item) => (
+          {items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

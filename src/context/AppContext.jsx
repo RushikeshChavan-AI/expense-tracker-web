@@ -19,14 +19,40 @@ import {
   removeTransaction,
   resetUserData,
   saveCategory,
+  saveSplitExpense,
   saveTransaction,
 } from "../services/supabaseDataService";
 
 const AppContext = createContext(null);
 
+function getSplitShareAmounts(expense) {
+  const amount = Number(expense.amount) || 0;
+  const participantIds = expense.participantIds || [];
+  if (!participantIds.length) return {};
+
+  if (expense.splitMethod === "percentage") {
+    return Object.fromEntries(
+      participantIds.map((participantId) => [
+        participantId,
+        amount * (Number(expense.shares?.[participantId] || 0) / 100),
+      ])
+    );
+  }
+
+  if (expense.splitMethod === "custom") {
+    return Object.fromEntries(
+      participantIds.map((participantId) => [participantId, Number(expense.shares?.[participantId] || 0)])
+    );
+  }
+
+  const equalShare = amount / participantIds.length;
+  return Object.fromEntries(participantIds.map((participantId) => [participantId, equalShare]));
+}
+
 export function AppProvider({ children }) {
   const toast = useToast();
   const { user } = useAuth();
+  const [profile, setProfile] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [splitPeople, setSplitPeople] = useState([]);
@@ -43,8 +69,9 @@ export function AppProvider({ children }) {
       setLoading(true);
       setSetupError(null);
       try {
-        const data = await fetchUserData(user.id);
+        const data = await fetchUserData(user);
         if (!active) return;
+        setProfile(data.profile);
         setTransactions(data.transactions);
         setCategories(data.categories);
         setSplitPeople(data.splitPeople);
@@ -203,6 +230,18 @@ export function AppProvider({ children }) {
     }
   };
 
+  const updateSplitExpense = async (id, data) => {
+    try {
+      const expense = await saveSplitExpense(id, data);
+      setSplitExpenses((prev) => prev.map((item) => (item.id === id ? expense : item)));
+      toast.success("Split expense updated");
+      return expense;
+    } catch (err) {
+      toast.error(err.message || "Failed to update split expense");
+      throw err;
+    }
+  };
+
   const deleteSplitExpense = async (id) => {
     try {
       await removeSplitExpense(id);
@@ -218,11 +257,10 @@ export function AppProvider({ children }) {
     const balances = Object.fromEntries(splitPeople.map((person) => [person.id, 0]));
 
     splitExpenses.forEach((expense) => {
-      const participantCount = expense.participantIds.length || 1;
-      const share = Number(expense.amount) / participantCount;
+      const shares = getSplitShareAmounts(expense);
       balances[expense.paidBy] = (balances[expense.paidBy] || 0) + Number(expense.amount);
-      expense.participantIds.forEach((participantId) => {
-        balances[participantId] = (balances[participantId] || 0) - share;
+      Object.entries(shares).forEach(([participantId, share]) => {
+        balances[participantId] = (balances[participantId] || 0) - Number(share);
       });
     });
 
@@ -232,29 +270,30 @@ export function AppProvider({ children }) {
     };
   }, [splitExpenses, splitPeople]);
 
+  const isStartupAccount = profile?.accountType === "startup";
+
   const stats = useMemo(() => {
     const totalIncome = transactions
       .filter((t) => t.type === "income")
       .reduce((sum, t) => sum + Number(t.amount), 0);
-    const totalExpense = transactions
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+    const totalExpense = isStartupAccount
+      ? splitExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0)
+      : transactions.filter((t) => t.type === "expense").reduce((sum, t) => sum + Number(t.amount), 0);
     const balance = totalIncome - totalExpense;
 
     const monthly = transactions.filter((t) => isSameMonth(t.date));
     const monthlyIncome = monthly
       .filter((t) => t.type === "income")
       .reduce((sum, t) => sum + Number(t.amount), 0);
-    const monthlyExpense = monthly
-      .filter((t) => t.type === "expense")
-      .reduce((sum, t) => sum + Number(t.amount), 0);
+    const monthlyExpense = isStartupAccount
+      ? splitExpenses.filter((expense) => isSameMonth(expense.date)).reduce((sum, expense) => sum + Number(expense.amount), 0)
+      : monthly.filter((t) => t.type === "expense").reduce((sum, t) => sum + Number(t.amount), 0);
 
     const byCategory = {};
-    transactions
-      .filter((t) => t.type === "expense")
-      .forEach((t) => {
-        byCategory[t.category] = (byCategory[t.category] || 0) + Number(t.amount);
-      });
+    const categoryRows = isStartupAccount ? splitExpenses : transactions.filter((t) => t.type === "expense");
+    categoryRows.forEach((t) => {
+      byCategory[t.category] = (byCategory[t.category] || 0) + Number(t.amount);
+    });
     const topCategoryId = Object.entries(byCategory).sort((a, b) => b[1] - a[1])[0]?.[0];
 
     return {
@@ -266,11 +305,13 @@ export function AppProvider({ children }) {
       byCategory,
       topCategoryId,
     };
-  }, [transactions]);
+  }, [isStartupAccount, splitExpenses, transactions]);
 
   const getCategory = (id) => categories.find((c) => c.id === id);
 
   const value = {
+    profile,
+    isStartupMode: isStartupAccount,
     transactions,
     categories,
     splitPeople,
@@ -289,6 +330,7 @@ export function AppProvider({ children }) {
     addSplitPerson,
     deleteSplitPerson,
     addSplitExpense,
+    updateSplitExpense,
     deleteSplitExpense,
     getCategory,
     loading,

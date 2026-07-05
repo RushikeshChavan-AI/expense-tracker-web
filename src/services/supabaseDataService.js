@@ -21,6 +21,15 @@ const mapCategory = (row) => ({
   custom: row.custom,
 });
 
+const mapProfile = (row) => ({
+  userId: row.user_id,
+  email: row.email,
+  accountType: row.account_type,
+  displayName: row.display_name || "",
+});
+
+const accountTypeForEmail = (email) => (email || "").toLowerCase() === "tracking@viewlyt.com" ? "startup" : "personal";
+
 const mapSplitPerson = (row) => ({
   id: row.id,
   name: row.name,
@@ -31,8 +40,11 @@ const mapSplitExpense = (row) => ({
   id: row.id,
   description: row.description,
   amount: Number(row.amount),
+  category: row.category || "",
   paidBy: row.paid_by,
   participantIds: row.participant_ids || [],
+  splitMethod: row.split_method || "equal",
+  shares: row.shares || {},
   date: row.date,
   createdAt: new Date(row.created_at).getTime(),
 });
@@ -66,8 +78,11 @@ const splitExpensePayload = (userId, data) => ({
   user_id: userId,
   description: data.description.trim(),
   amount: Number(data.amount),
+  category: data.category || "",
   paid_by: data.paidBy,
   participant_ids: data.participantIds,
+  split_method: data.splitMethod || "equal",
+  shares: data.shares || {},
   date: data.date,
 });
 
@@ -80,13 +95,75 @@ async function seedDefaultCategories(userId) {
   return data.map(mapCategory);
 }
 
-export async function fetchUserData(userId) {
+async function getOrCreateProfile(user) {
+  const fallback = {
+    userId: user.id,
+    email: user.email || "",
+    accountType: accountTypeForEmail(user.email),
+    displayName: "",
+  };
+
+  const { data: existing, error: existingError } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (existingError) {
+    if (isMissingTableError(existingError)) return fallback;
+    throw existingError;
+  }
+  if (existing) {
+    const profile = mapProfile(existing);
+    const expectedAccountType = accountTypeForEmail(user.email);
+
+    if (expectedAccountType === "startup" && profile.accountType !== "startup") {
+      const { data, error } = await supabase
+        .from("profiles")
+        .update({
+          email: user.email || profile.email,
+          account_type: "startup",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id)
+        .select("*")
+        .single();
+
+      if (!error && data) return mapProfile(data);
+      return { ...profile, accountType: "startup" };
+    }
+
+    return profile;
+  }
+
+  const email = user.email || "";
+  const { data, error } = await supabase
+    .from("profiles")
+    .insert({
+      user_id: user.id,
+      email,
+      account_type: fallback.accountType,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    if (isMissingTableError(error)) return fallback;
+    throw error;
+  }
+  return mapProfile(data);
+}
+
+export async function fetchUserData(user) {
+  const userId = user.id;
   const [
+    profileResult,
     { data: categoryRows, error: categoriesError },
     { data: transactionRows, error: transactionsError },
     splitPeopleResult,
     splitExpensesResult,
   ] = await Promise.all([
+      getOrCreateProfile(user),
       supabase.from("categories").select("*").order("custom", { ascending: true }).order("name"),
       supabase.from("transactions").select("*").order("created_at", { ascending: false }),
       supabase.from("split_people").select("*").order("created_at", { ascending: true }),
@@ -102,6 +179,7 @@ export async function fetchUserData(userId) {
   const categories = categoryRows.length ? categoryRows.map(mapCategory) : await seedDefaultCategories(userId);
 
   return {
+    profile: profileResult,
     categories,
     transactions: transactionRows.map(mapTransaction),
     splitPeople: splitPeopleResult.data?.map(mapSplitPerson) || [],
@@ -195,6 +273,26 @@ export async function createSplitExpense(userId, data) {
   const { data: row, error } = await supabase
     .from("split_expenses")
     .insert(splitExpensePayload(userId, data))
+    .select("*")
+    .single();
+  if (error) throw error;
+  return mapSplitExpense(row);
+}
+
+export async function saveSplitExpense(id, data) {
+  const { data: row, error } = await supabase
+    .from("split_expenses")
+    .update({
+      description: data.description.trim(),
+      amount: Number(data.amount),
+      category: data.category || "",
+      paid_by: data.paidBy,
+      participant_ids: data.participantIds,
+      split_method: data.splitMethod || "equal",
+      shares: data.shares || {},
+      date: data.date,
+    })
+    .eq("id", id)
     .select("*")
     .single();
   if (error) throw error;
