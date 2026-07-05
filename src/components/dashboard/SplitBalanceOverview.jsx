@@ -1,37 +1,8 @@
 import { Link } from "react-router-dom";
-import { ArrowRightLeft, Receipt, Users } from "lucide-react";
+import { ArrowRightLeft, Receipt, Users, WalletCards } from "lucide-react";
 import { useApp } from "../../context/AppContext";
 import { formatCurrency, formatDate } from "../../utils/format";
 import EmptyState from "../ui/EmptyState";
-
-function getSettlements(people, balances) {
-  const creditors = people
-    .map((person) => ({ ...person, amount: Number(balances[person.id] || 0) }))
-    .filter((person) => person.amount > 0.01)
-    .sort((a, b) => b.amount - a.amount);
-  const debtors = people
-    .map((person) => ({ ...person, amount: Math.abs(Number(balances[person.id] || 0)) }))
-    .filter((person) => person.amount > 0.01)
-    .sort((a, b) => b.amount - a.amount);
-
-  const settlements = [];
-  let debtorIndex = 0;
-  let creditorIndex = 0;
-
-  while (debtors[debtorIndex] && creditors[creditorIndex]) {
-    const debtor = debtors[debtorIndex];
-    const creditor = creditors[creditorIndex];
-    const amount = Math.min(debtor.amount, creditor.amount);
-
-    settlements.push({ from: debtor.name, to: creditor.name, amount });
-    debtor.amount -= amount;
-    creditor.amount -= amount;
-    if (debtor.amount <= 0.01) debtorIndex += 1;
-    if (creditor.amount <= 0.01) creditorIndex += 1;
-  }
-
-  return settlements;
-}
 
 function SplitBalanceOrb({ totalSplit, outstanding }) {
   const radius = 70;
@@ -89,10 +60,11 @@ function SplitBalanceOrb({ totalSplit, outstanding }) {
 }
 
 export default function SplitBalanceOverview() {
-  const { splitPeople, splitExpenses, splitStats, splitSetupRequired } = useApp();
+  const { splitPeople, splitExpenses, splitSettlements, splitStats, splitSetupRequired } = useApp();
   const peopleById = Object.fromEntries(splitPeople.map((person) => [person.id, person]));
-  const settlements = getSettlements(splitPeople, splitStats.balances).slice(0, 3);
+  const settlements = (splitStats.settlementSuggestions || []).slice(0, 3);
   const recent = splitExpenses.slice(0, 3);
+  const recentSettlements = splitSettlements.slice(0, 3);
   const activeBalances = splitPeople
     .map((person) => ({ ...person, balance: Number(splitStats.balances[person.id] || 0) }))
     .filter((person) => Math.abs(person.balance) > 0.01)
@@ -157,6 +129,15 @@ export default function SplitBalanceOverview() {
             </p>
             <p className="mt-2 font-mono-num text-xl font-bold text-ink">{splitPeople.length}</p>
           </div>
+          <div className="rounded-xl bg-white/5 p-4 sm:col-span-3">
+            <p className="flex items-center gap-2 text-xs text-muted">
+              <WalletCards size={14} className="text-gold" /> Recorded payments
+            </p>
+            <p className="mt-2 font-mono-num text-xl font-bold text-ink">{formatCurrency(splitStats.settledTotal || 0)}</p>
+            {splitStats.pendingSettlementTotal > 0 && (
+              <p className="mt-1 text-xs text-muted">{formatCurrency(splitStats.pendingSettlementTotal)} pending</p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -215,6 +196,28 @@ export default function SplitBalanceOverview() {
                   </p>
                 </div>
                 <p className="shrink-0 font-mono-num text-sm font-bold text-ink">{formatCurrency(expense.amount)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {recentSettlements.length > 0 && (
+        <div>
+          <h4 className="mb-3 text-xs font-semibold uppercase text-muted">Recent Payments</h4>
+          <div className="divide-y divide-border/50 rounded-xl bg-white/5">
+            {recentSettlements.map((settlement) => (
+              <div key={settlement.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-ink">
+                    {peopleById[settlement.fromPersonId]?.name || "Unknown"} paid{" "}
+                    {peopleById[settlement.toPersonId]?.name || "Unknown"}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {settlement.status} · {formatDate(settlement.date)}
+                  </p>
+                </div>
+                <p className="shrink-0 font-mono-num text-sm font-bold text-ink">{formatCurrency(settlement.amount)}</p>
               </div>
             ))}
           </div>

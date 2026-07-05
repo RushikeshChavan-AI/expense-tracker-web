@@ -1,4 +1,4 @@
-import { DEFAULT_CATEGORIES } from "../utils/constants";
+import { getDefaultCategories } from "../utils/constants";
 import { uid } from "../utils/format";
 import { supabase } from "../lib/supabase";
 
@@ -49,6 +49,18 @@ const mapSplitExpense = (row) => ({
   createdAt: new Date(row.created_at).getTime(),
 });
 
+const mapSplitSettlement = (row) => ({
+  id: row.id,
+  fromPersonId: row.from_person_id,
+  toPersonId: row.to_person_id,
+  amount: Number(row.amount),
+  method: row.method,
+  status: row.status,
+  date: row.date,
+  note: row.note || "",
+  createdAt: new Date(row.created_at).getTime(),
+});
+
 const transactionPayload = (userId, data) => ({
   user_id: userId,
   type: data.type,
@@ -86,13 +98,43 @@ const splitExpensePayload = (userId, data) => ({
   date: data.date,
 });
 
+const splitSettlementPayload = (userId, data) => ({
+  user_id: userId,
+  from_person_id: data.fromPersonId,
+  to_person_id: data.toPersonId,
+  amount: Number(data.amount),
+  method: data.method,
+  status: data.status,
+  date: data.date,
+  note: data.note || "",
+});
+
 const isMissingTableError = (error) => error?.code === "PGRST205" || error?.message?.includes("schema cache");
 
-async function seedDefaultCategories(userId) {
-  const payload = DEFAULT_CATEGORIES.map((category) => categoryPayload(userId, category));
+async function insertDefaultCategories(userId, categories) {
+  const payload = categories.map((category) => categoryPayload(userId, category));
   const { data, error } = await supabase.from("categories").insert(payload).select("*");
   if (error) throw error;
   return data.map(mapCategory);
+}
+
+async function seedDefaultCategories(userId, accountType = "personal") {
+  return insertDefaultCategories(userId, getDefaultCategories(accountType));
+}
+
+async function ensureDefaultCategories(userId, accountType, categoryRows) {
+  const existingCategories = categoryRows.map(mapCategory);
+  const existingIds = new Set(existingCategories.map((category) => category.id));
+  const missingDefaults = getDefaultCategories(accountType).filter((category) => !existingIds.has(category.id));
+
+  if (!categoryRows.length) return seedDefaultCategories(userId, accountType);
+  if (!missingDefaults.length) return existingCategories;
+
+  const inserted = await insertDefaultCategories(userId, missingDefaults);
+  return [...existingCategories, ...inserted].sort((a, b) => {
+    if (a.custom !== b.custom) return Number(a.custom) - Number(b.custom);
+    return a.name.localeCompare(b.name);
+  });
 }
 
 async function getOrCreateProfile(user) {
@@ -162,21 +204,27 @@ export async function fetchUserData(user) {
     { data: transactionRows, error: transactionsError },
     splitPeopleResult,
     splitExpensesResult,
+    splitSettlementsResult,
   ] = await Promise.all([
       getOrCreateProfile(user),
       supabase.from("categories").select("*").order("custom", { ascending: true }).order("name"),
       supabase.from("transactions").select("*").order("created_at", { ascending: false }),
       supabase.from("split_people").select("*").order("created_at", { ascending: true }),
       supabase.from("split_expenses").select("*").order("created_at", { ascending: false }),
+      supabase.from("split_settlements").select("*").order("created_at", { ascending: false }),
     ]);
 
   if (categoriesError) throw categoriesError;
   if (transactionsError) throw transactionsError;
-  const splitSetupRequired = isMissingTableError(splitPeopleResult.error) || isMissingTableError(splitExpensesResult.error);
+  const splitSetupRequired =
+    isMissingTableError(splitPeopleResult.error) ||
+    isMissingTableError(splitExpensesResult.error) ||
+    isMissingTableError(splitSettlementsResult.error);
   if (splitPeopleResult.error && !isMissingTableError(splitPeopleResult.error)) throw splitPeopleResult.error;
   if (splitExpensesResult.error && !isMissingTableError(splitExpensesResult.error)) throw splitExpensesResult.error;
+  if (splitSettlementsResult.error && !isMissingTableError(splitSettlementsResult.error)) throw splitSettlementsResult.error;
 
-  const categories = categoryRows.length ? categoryRows.map(mapCategory) : await seedDefaultCategories(userId);
+  const categories = await ensureDefaultCategories(userId, profileResult.accountType, categoryRows);
 
   return {
     profile: profileResult,
@@ -184,6 +232,7 @@ export async function fetchUserData(user) {
     transactions: transactionRows.map(mapTransaction),
     splitPeople: splitPeopleResult.data?.map(mapSplitPerson) || [],
     splitExpenses: splitExpensesResult.data?.map(mapSplitExpense) || [],
+    splitSettlements: splitSettlementsResult.data?.map(mapSplitSettlement) || [],
     splitSetupRequired,
   };
 }
@@ -304,23 +353,41 @@ export async function removeSplitExpense(id) {
   if (error) throw error;
 }
 
-export async function resetUserData(userId) {
+export async function createSplitSettlement(userId, data) {
+  const { data: row, error } = await supabase
+    .from("split_settlements")
+    .insert(splitSettlementPayload(userId, data))
+    .select("*")
+    .single();
+  if (error) throw error;
+  return mapSplitSettlement(row);
+}
+
+export async function removeSplitSettlement(id) {
+  const { error } = await supabase.from("split_settlements").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function resetUserData(userId, accountType = "personal") {
   const [
     { error: splitExpensesError },
+    { error: splitSettlementsError },
     { error: splitPeopleError },
     { error: transactionsError },
     { error: categoriesError },
   ] = await Promise.all([
     supabase.from("split_expenses").delete().eq("user_id", userId),
+    supabase.from("split_settlements").delete().eq("user_id", userId),
     supabase.from("split_people").delete().eq("user_id", userId),
     supabase.from("transactions").delete().eq("user_id", userId),
     supabase.from("categories").delete().eq("user_id", userId),
   ]);
 
   if (splitExpensesError && !isMissingTableError(splitExpensesError)) throw splitExpensesError;
+  if (splitSettlementsError && !isMissingTableError(splitSettlementsError)) throw splitSettlementsError;
   if (splitPeopleError && !isMissingTableError(splitPeopleError)) throw splitPeopleError;
   if (transactionsError) throw transactionsError;
   if (categoriesError) throw categoriesError;
 
-  return seedDefaultCategories(userId);
+  return seedDefaultCategories(userId, accountType);
 }

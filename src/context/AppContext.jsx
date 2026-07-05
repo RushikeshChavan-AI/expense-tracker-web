@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Database, ExternalLink } from "lucide-react";
 import { DEFAULT_CATEGORIES } from "../utils/constants";
 import { isSameMonth } from "../utils/format";
+import { applySettlementToBalances, getSplitShareAmounts, getSettlementSuggestions } from "../utils/splitMath";
 import { useToast } from "./ToastContext";
 import { useAuth } from "./AuthContext";
 import Loader from "../components/ui/Loader";
@@ -10,12 +11,14 @@ import {
   createCategory,
   createSplitExpense,
   createSplitPerson,
+  createSplitSettlement,
   createTransaction,
   fetchUserData,
   importTransactionRows,
   removeCategory,
   removeSplitExpense,
   removeSplitPerson,
+  removeSplitSettlement,
   removeTransaction,
   resetUserData,
   saveCategory,
@@ -25,30 +28,6 @@ import {
 
 const AppContext = createContext(null);
 
-function getSplitShareAmounts(expense) {
-  const amount = Number(expense.amount) || 0;
-  const participantIds = expense.participantIds || [];
-  if (!participantIds.length) return {};
-
-  if (expense.splitMethod === "percentage") {
-    return Object.fromEntries(
-      participantIds.map((participantId) => [
-        participantId,
-        amount * (Number(expense.shares?.[participantId] || 0) / 100),
-      ])
-    );
-  }
-
-  if (expense.splitMethod === "custom") {
-    return Object.fromEntries(
-      participantIds.map((participantId) => [participantId, Number(expense.shares?.[participantId] || 0)])
-    );
-  }
-
-  const equalShare = amount / participantIds.length;
-  return Object.fromEntries(participantIds.map((participantId) => [participantId, equalShare]));
-}
-
 export function AppProvider({ children }) {
   const toast = useToast();
   const { user } = useAuth();
@@ -57,6 +36,7 @@ export function AppProvider({ children }) {
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [splitPeople, setSplitPeople] = useState([]);
   const [splitExpenses, setSplitExpenses] = useState([]);
+  const [splitSettlements, setSplitSettlements] = useState([]);
   const [splitSetupRequired, setSplitSetupRequired] = useState(false);
   const [loading, setLoading] = useState(true);
   const [setupError, setSetupError] = useState(null);
@@ -76,6 +56,7 @@ export function AppProvider({ children }) {
         setCategories(data.categories);
         setSplitPeople(data.splitPeople);
         setSplitExpenses(data.splitExpenses);
+        setSplitSettlements(data.splitSettlements);
         setSplitSetupRequired(data.splitSetupRequired);
       } catch (err) {
         if (!active) return;
@@ -177,11 +158,12 @@ export function AppProvider({ children }) {
 
   const clearAllData = async () => {
     try {
-      const seededCategories = await resetUserData(user.id);
+      const seededCategories = await resetUserData(user.id, profile?.accountType || "personal");
       setTransactions([]);
       setCategories(seededCategories);
       setSplitPeople([]);
       setSplitExpenses([]);
+      setSplitSettlements([]);
       toast.warning("All data has been cleared");
     } catch (err) {
       toast.error(err.message || "Failed to clear data");
@@ -202,9 +184,11 @@ export function AppProvider({ children }) {
   };
 
   const deleteSplitPerson = async (id) => {
-    const isUsed = splitExpenses.some((expense) => expense.paidBy === id || expense.participantIds.includes(id));
+    const isUsed =
+      splitExpenses.some((expense) => expense.paidBy === id || expense.participantIds.includes(id)) ||
+      splitSettlements.some((settlement) => settlement.fromPersonId === id || settlement.toPersonId === id);
     if (isUsed) {
-      toast.warning("Delete that person's split expenses before removing them");
+      toast.warning("Delete that person's split activity before removing them");
       return;
     }
 
@@ -253,22 +237,66 @@ export function AppProvider({ children }) {
     }
   };
 
+  const addSplitSettlement = async (data) => {
+    try {
+      const settlement = await createSplitSettlement(user.id, data);
+      setSplitSettlements((prev) => [settlement, ...prev]);
+      toast.success(settlement.status === "pending" ? "Settlement note added" : "Payment recorded");
+      return settlement;
+    } catch (err) {
+      toast.error(err.message || "Failed to record settlement");
+      throw err;
+    }
+  };
+
+  const deleteSplitSettlement = async (id) => {
+    try {
+      await removeSplitSettlement(id);
+      setSplitSettlements((prev) => prev.filter((settlement) => settlement.id !== id));
+      toast.info("Settlement removed");
+    } catch (err) {
+      toast.error(err.message || "Failed to remove settlement");
+      throw err;
+    }
+  };
+
   const splitStats = useMemo(() => {
-    const balances = Object.fromEntries(splitPeople.map((person) => [person.id, 0]));
+    let balances = Object.fromEntries(splitPeople.map((person) => [person.id, 0]));
 
     splitExpenses.forEach((expense) => {
       const shares = getSplitShareAmounts(expense);
-      balances[expense.paidBy] = (balances[expense.paidBy] || 0) + Number(expense.amount);
+      balances = {
+        ...balances,
+        [expense.paidBy]: (balances[expense.paidBy] || 0) + Number(expense.amount),
+      };
       Object.entries(shares).forEach(([participantId, share]) => {
-        balances[participantId] = (balances[participantId] || 0) - Number(share);
+        balances = {
+          ...balances,
+          [participantId]: (balances[participantId] || 0) - Number(share),
+        };
       });
     });
+
+    splitSettlements.forEach((settlement) => {
+      balances = applySettlementToBalances(balances, settlement);
+    });
+
+    const settlementSuggestions = getSettlementSuggestions(splitPeople, balances);
+    const settledTotal = splitSettlements
+      .filter((settlement) => settlement.status !== "pending")
+      .reduce((sum, settlement) => sum + Number(settlement.amount), 0);
+    const pendingSettlementTotal = splitSettlements
+      .filter((settlement) => settlement.status === "pending")
+      .reduce((sum, settlement) => sum + Number(settlement.amount), 0);
 
     return {
       totalSplit: splitExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0),
       balances,
+      settlementSuggestions,
+      settledTotal,
+      pendingSettlementTotal,
     };
-  }, [splitExpenses, splitPeople]);
+  }, [splitExpenses, splitPeople, splitSettlements]);
 
   const isStartupAccount = profile?.accountType === "startup";
 
@@ -316,6 +344,7 @@ export function AppProvider({ children }) {
     categories,
     splitPeople,
     splitExpenses,
+    splitSettlements,
     splitStats,
     splitSetupRequired,
     stats,
@@ -332,6 +361,8 @@ export function AppProvider({ children }) {
     addSplitExpense,
     updateSplitExpense,
     deleteSplitExpense,
+    addSplitSettlement,
+    deleteSplitSettlement,
     getCategory,
     loading,
   };

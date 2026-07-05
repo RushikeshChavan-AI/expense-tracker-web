@@ -52,6 +52,20 @@ create table if not exists public.split_expenses (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.split_settlements (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  from_person_id text not null,
+  to_person_id text not null,
+  amount numeric(12, 2) not null check (amount > 0),
+  method text not null default 'upi' check (method in ('upi', 'bank_transfer', 'cash', 'card', 'other')),
+  status text not null default 'settled' check (status in ('pending', 'partial', 'settled')),
+  date date not null,
+  note text,
+  created_at timestamptz not null default now(),
+  check (from_person_id <> to_person_id)
+);
+
 alter table public.split_expenses
   add column if not exists category text,
   add column if not exists split_method text not null default 'equal',
@@ -69,11 +83,15 @@ create index if not exists transactions_user_id_created_at_idx
 create index if not exists split_expenses_user_id_created_at_idx
   on public.split_expenses (user_id, created_at desc);
 
+create index if not exists split_settlements_user_id_created_at_idx
+  on public.split_settlements (user_id, created_at desc);
+
 alter table public.categories enable row level security;
 alter table public.profiles enable row level security;
 alter table public.transactions enable row level security;
 alter table public.split_people enable row level security;
 alter table public.split_expenses enable row level security;
+alter table public.split_settlements enable row level security;
 
 drop policy if exists "Users can read their own categories" on public.categories;
 create policy "Users can read their own categories"
@@ -183,6 +201,27 @@ create policy "Users can update their own split expenses"
 drop policy if exists "Users can delete their own split expenses" on public.split_expenses;
 create policy "Users can delete their own split expenses"
   on public.split_expenses for delete
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can read their own split settlements" on public.split_settlements;
+create policy "Users can read their own split settlements"
+  on public.split_settlements for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert their own split settlements" on public.split_settlements;
+create policy "Users can insert their own split settlements"
+  on public.split_settlements for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update their own split settlements" on public.split_settlements;
+create policy "Users can update their own split settlements"
+  on public.split_settlements for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete their own split settlements" on public.split_settlements;
+create policy "Users can delete their own split settlements"
+  on public.split_settlements for delete
   using (auth.uid() = user_id);
 
 notify pgrst, 'reload schema';
