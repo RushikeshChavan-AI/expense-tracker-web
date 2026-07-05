@@ -6,11 +6,10 @@ import Input from "../components/ui/Input";
 import { useAuth } from "../context/AuthContext";
 
 export default function Auth() {
-  const { user, loading, isSupabaseConfigured, signIn, signUp } = useAuth();
+  const { user, loading, isSupabaseConfigured, signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname || "/";
-  const [mode, setMode] = useState("signin");
   const [form, setForm] = useState({ email: "", password: "" });
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -33,17 +32,11 @@ export default function Auth() {
     }
 
     setSubmitting(true);
-    const { data, error: authError } =
-      mode === "signin" ? await signIn(form.email, form.password) : await signUp(form.email, form.password);
+    const { error: authError } = await signIn(form.email, form.password);
     setSubmitting(false);
 
     if (authError) {
       setError(authError.message);
-      return;
-    }
-
-    if (mode === "signup" && !data.session) {
-      setMessage("Account created. Check your email to confirm your address, then sign in.");
       return;
     }
 
@@ -75,26 +68,9 @@ export default function Auth() {
         </div>
 
         <div className="p-6 sm:p-8">
-          <div className="mb-6 grid grid-cols-2 gap-2 rounded-xl bg-white/5 p-1">
-            {[
-              { id: "signin", label: "Sign in" },
-              { id: "signup", label: "Create account" },
-            ].map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                onClick={() => {
-                  setMode(item.id);
-                  setError("");
-                  setMessage("");
-                }}
-                className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  mode === item.id ? "bg-gold text-bg" : "text-muted hover:text-ink"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className="mb-6">
+            <h2 className="font-display text-xl font-bold text-ink">Sign in</h2>
+            <p className="mt-1 text-sm text-muted">Use the account already created for this tracker.</p>
           </div>
 
           {!isSupabaseConfigured ? (
@@ -116,7 +92,7 @@ export default function Auth() {
                 label="Password"
                 icon={LockKeyhole}
                 type="password"
-                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                autoComplete="current-password"
                 minLength={6}
                 value={form.password}
                 onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
@@ -124,7 +100,7 @@ export default function Auth() {
               {error && <p className="text-sm text-coral">{error}</p>}
               {message && <p className="text-sm text-emerald">{message}</p>}
               <Button type="submit" loading={submitting} fullWidth>
-                {mode === "signin" ? "Sign in" : "Create account"}
+                Sign in
               </Button>
             </form>
           )}
