@@ -1,0 +1,16 @@
+{
+  "projectId": "prj_8oYHjvG2S2m3tmyi4dng46rK4H8Q",
+  "orgId": "team_5bkhjbhgCrAh2j9oo6lvKFJg",
+  "projectName": "expense-tracker-web",
+  "settings": {
+    "createdAt": 1783208735448,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}
