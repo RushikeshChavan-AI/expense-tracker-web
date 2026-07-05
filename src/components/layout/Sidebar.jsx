@@ -6,6 +6,7 @@ import {
   TrendingDown,
   Tags,
   Sparkles,
+  Users,
   Settings,
   Wallet,
   X,
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { to: "/income", label: "Income", icon: TrendingUp },
   { to: "/expenses", label: "Expenses", icon: TrendingDown },
   { to: "/categories", label: "Categories", icon: Tags },
+  { to: "/split-expenses", label: "Split Expenses", icon: Users },
   { to: "/ai-assistant", label: "AI Assistant", icon: Sparkles },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

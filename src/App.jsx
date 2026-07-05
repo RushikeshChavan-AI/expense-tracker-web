@@ -9,6 +9,7 @@ import Transactions from "./pages/Transactions";
 import Income from "./pages/Income";
 import Expenses from "./pages/Expenses";
 import Categories from "./pages/Categories";
+import SplitExpenses from "./pages/SplitExpenses";
 import AIAssistant from "./pages/AIAssistant";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
@@ -36,6 +37,7 @@ export default function App() {
               <Route path="/income" element={<Income />} />
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/categories" element={<Categories />} />
+              <Route path="/split-expenses" element={<SplitExpenses />} />
               <Route path="/ai-assistant" element={<AIAssistant />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />

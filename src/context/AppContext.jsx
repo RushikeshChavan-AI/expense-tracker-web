@@ -8,10 +8,14 @@ import Loader from "../components/ui/Loader";
 import Button from "../components/ui/Button";
 import {
   createCategory,
+  createSplitExpense,
+  createSplitPerson,
   createTransaction,
   fetchUserData,
   importTransactionRows,
   removeCategory,
+  removeSplitExpense,
+  removeSplitPerson,
   removeTransaction,
   resetUserData,
   saveCategory,
@@ -25,6 +29,9 @@ export function AppProvider({ children }) {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [splitPeople, setSplitPeople] = useState([]);
+  const [splitExpenses, setSplitExpenses] = useState([]);
+  const [splitSetupRequired, setSplitSetupRequired] = useState(false);
   const [loading, setLoading] = useState(true);
   const [setupError, setSetupError] = useState(null);
 
@@ -40,6 +47,9 @@ export function AppProvider({ children }) {
         if (!active) return;
         setTransactions(data.transactions);
         setCategories(data.categories);
+        setSplitPeople(data.splitPeople);
+        setSplitExpenses(data.splitExpenses);
+        setSplitSetupRequired(data.splitSetupRequired);
       } catch (err) {
         if (!active) return;
         if (err.code === "PGRST205" || err.message?.includes("schema cache")) {
@@ -143,12 +153,84 @@ export function AppProvider({ children }) {
       const seededCategories = await resetUserData(user.id);
       setTransactions([]);
       setCategories(seededCategories);
+      setSplitPeople([]);
+      setSplitExpenses([]);
       toast.warning("All data has been cleared");
     } catch (err) {
       toast.error(err.message || "Failed to clear data");
       throw err;
     }
   };
+
+  const addSplitPerson = async (data) => {
+    try {
+      const person = await createSplitPerson(user.id, data);
+      setSplitPeople((prev) => [...prev, person]);
+      toast.success(`${person.name} added to splits`);
+      return person;
+    } catch (err) {
+      toast.error(err.message || "Failed to add split person");
+      throw err;
+    }
+  };
+
+  const deleteSplitPerson = async (id) => {
+    const isUsed = splitExpenses.some((expense) => expense.paidBy === id || expense.participantIds.includes(id));
+    if (isUsed) {
+      toast.warning("Delete that person's split expenses before removing them");
+      return;
+    }
+
+    try {
+      await removeSplitPerson(id);
+      setSplitPeople((prev) => prev.filter((person) => person.id !== id));
+      toast.info("Split person removed");
+    } catch (err) {
+      toast.error(err.message || "Failed to remove split person");
+      throw err;
+    }
+  };
+
+  const addSplitExpense = async (data) => {
+    try {
+      const expense = await createSplitExpense(user.id, data);
+      setSplitExpenses((prev) => [expense, ...prev]);
+      toast.success("Split expense added");
+      return expense;
+    } catch (err) {
+      toast.error(err.message || "Failed to add split expense");
+      throw err;
+    }
+  };
+
+  const deleteSplitExpense = async (id) => {
+    try {
+      await removeSplitExpense(id);
+      setSplitExpenses((prev) => prev.filter((expense) => expense.id !== id));
+      toast.info("Split expense deleted");
+    } catch (err) {
+      toast.error(err.message || "Failed to delete split expense");
+      throw err;
+    }
+  };
+
+  const splitStats = useMemo(() => {
+    const balances = Object.fromEntries(splitPeople.map((person) => [person.id, 0]));
+
+    splitExpenses.forEach((expense) => {
+      const participantCount = expense.participantIds.length || 1;
+      const share = Number(expense.amount) / participantCount;
+      balances[expense.paidBy] = (balances[expense.paidBy] || 0) + Number(expense.amount);
+      expense.participantIds.forEach((participantId) => {
+        balances[participantId] = (balances[participantId] || 0) - share;
+      });
+    });
+
+    return {
+      totalSplit: splitExpenses.reduce((sum, expense) => sum + Number(expense.amount), 0),
+      balances,
+    };
+  }, [splitExpenses, splitPeople]);
 
   const stats = useMemo(() => {
     const totalIncome = transactions
@@ -191,6 +273,10 @@ export function AppProvider({ children }) {
   const value = {
     transactions,
     categories,
+    splitPeople,
+    splitExpenses,
+    splitStats,
+    splitSetupRequired,
     stats,
     addTransaction,
     updateTransaction,
@@ -200,6 +286,10 @@ export function AppProvider({ children }) {
     updateCategory,
     deleteCategory,
     clearAllData,
+    addSplitPerson,
+    deleteSplitPerson,
+    addSplitExpense,
+    deleteSplitExpense,
     getCategory,
     loading,
   };

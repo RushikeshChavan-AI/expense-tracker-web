@@ -21,11 +21,35 @@ create table if not exists public.transactions (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.split_people (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  id text not null,
+  name text not null,
+  created_at timestamptz not null default now(),
+  primary key (user_id, id)
+);
+
+create table if not exists public.split_expenses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  description text not null,
+  amount numeric(12, 2) not null check (amount > 0),
+  paid_by text not null,
+  participant_ids text[] not null,
+  date date not null,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists transactions_user_id_created_at_idx
   on public.transactions (user_id, created_at desc);
 
+create index if not exists split_expenses_user_id_created_at_idx
+  on public.split_expenses (user_id, created_at desc);
+
 alter table public.categories enable row level security;
 alter table public.transactions enable row level security;
+alter table public.split_people enable row level security;
+alter table public.split_expenses enable row level security;
 
 drop policy if exists "Users can read their own categories" on public.categories;
 create policy "Users can read their own categories"
@@ -67,6 +91,48 @@ create policy "Users can update their own transactions"
 drop policy if exists "Users can delete their own transactions" on public.transactions;
 create policy "Users can delete their own transactions"
   on public.transactions for delete
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can read their own split people" on public.split_people;
+create policy "Users can read their own split people"
+  on public.split_people for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert their own split people" on public.split_people;
+create policy "Users can insert their own split people"
+  on public.split_people for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update their own split people" on public.split_people;
+create policy "Users can update their own split people"
+  on public.split_people for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete their own split people" on public.split_people;
+create policy "Users can delete their own split people"
+  on public.split_people for delete
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can read their own split expenses" on public.split_expenses;
+create policy "Users can read their own split expenses"
+  on public.split_expenses for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert their own split expenses" on public.split_expenses;
+create policy "Users can insert their own split expenses"
+  on public.split_expenses for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update their own split expenses" on public.split_expenses;
+create policy "Users can update their own split expenses"
+  on public.split_expenses for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete their own split expenses" on public.split_expenses;
+create policy "Users can delete their own split expenses"
+  on public.split_expenses for delete
   using (auth.uid() = user_id);
 
 notify pgrst, 'reload schema';

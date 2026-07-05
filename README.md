@@ -12,6 +12,7 @@ Authentication and account-specific data storage are powered by Supabase, so eac
 - **Transactions** — add, edit, delete, search, filter, sort, and paginate every transaction in one place.
 - **Income & Expenses** — dedicated views for each transaction type with full history.
 - **Categories** — 10 built-in categories (Food, Transport, Shopping, Bills, Entertainment, Health, Education, Salary, Freelance, Other) plus support for unlimited custom categories with your own name, color, and icon.
+- **Split Expenses** — add people, record who paid, split shared expenses, and see who owes whom.
 - **AI Assistant** — type things like *"I spent ₹500 on food today"* or *"Received salary ₹25000"* and the assistant detects the type, amount, category, date, and description, then shows a confirmation card before saving anything.
 - **Analytics** — pie chart of category spending, bar chart of monthly income vs. expenses, and a running balance trend line.
 - **CSV Export / Import** — back up your transactions to CSV or import them from a previous export.
@@ -87,7 +88,7 @@ src/
 ├── hooks/                # Analytics and filtered transaction hooks
 ├── layouts/              # MainLayout (sidebar + navbar + outlet)
 ├── pages/                # Auth, Dashboard, Transactions, Income, Expenses,
-│                          # Categories, AIAssistant, Settings, NotFound
+│                          # Categories, SplitExpenses, AIAssistant, Settings, NotFound
 ├── services/              # aiService, csvService, Supabase data service
 ├── utils/                # constants, formatters, category-icon map
 ├── App.jsx                # Router setup
@@ -146,6 +147,13 @@ VITE_OPENAI_API_KEY=
 5. Restart the dev server.
 
 `SUPABASE_DB_URL` is only for the local Node setup script. Do not use it in browser code or expose it to deployed frontend environments.
+
+The schema creates these per-user tables:
+
+- `categories`
+- `transactions`
+- `split_people`
+- `split_expenses`
 
 ---
 
