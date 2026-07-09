@@ -11,6 +11,7 @@ import Expenses from "./pages/Expenses";
 import Categories from "./pages/Categories";
 import SplitExpenses from "./pages/SplitExpenses";
 import AIAssistant from "./pages/AIAssistant";
+import KnowledgeHub from "./pages/KnowledgeHub";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import Auth from "./pages/Auth";
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="/categories" element={<Categories />} />
               <Route path="/split-expenses" element={<SplitExpenses />} />
               <Route path="/ai-assistant" element={<AIAssistant />} />
+              <Route path="/knowledge-hub" element={<KnowledgeHub />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<NotFound />} />
             </Route>
