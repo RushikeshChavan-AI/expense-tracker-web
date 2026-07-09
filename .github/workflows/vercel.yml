@@ -29,5 +29,17 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Normalize Vercel token
+        env:
+          RAW_VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          VERCEL_TOKEN="$(printf '%s' "${RAW_VERCEL_TOKEN}" | tr -d '[:space:]')"
+          if [ -z "${VERCEL_TOKEN}" ]; then
+            echo "VERCEL_TOKEN is not configured."
+            exit 1
+          fi
+          echo "::add-mask::${VERCEL_TOKEN}"
+          echo "VERCEL_TOKEN=${VERCEL_TOKEN}" >> "${GITHUB_ENV}"
+
       - name: Deploy
-        run: npx vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel deploy --prod --yes --token="${VERCEL_TOKEN}"
